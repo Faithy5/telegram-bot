@@ -284,6 +284,12 @@ export interface PollerDeps {
   circuitBreakerOptions?: CircuitBreakerOptions;
   /** Clock behind every timestamp this poller reports. Defaults to `Date.now`. */
   now?: () => number;
+  /**
+   * Async delay used for send-spacing and retry back-off.
+   * Defaults to a real `setTimeout`-based sleep. Inject a no-op in tests to
+   * avoid waiting for real wall-clock time.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface ShutdownOptions {
@@ -386,7 +392,7 @@ export function extractRetryAfterMs(err: unknown): number | null {
  */
 const MAX_FLOOR_REWINDS = 3;
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * Wait for `promise`, resolving `false` if `timeoutMs` elapses first.
@@ -774,7 +780,7 @@ export async function waitForStartupHealth(
   attempts: number;
 }> {
   const now = options.now ?? Date.now;
-  const sleepFn = options.sleep ?? sleep;
+  const sleepFn = options.sleep ?? defaultSleep;
   const deadlineMs = Math.max(0, options.deadlineMs);
   const retryMs = Math.max(0, options.retryMs);
   const startedAt = now();
@@ -843,6 +849,7 @@ async function sendWithRetry(
   botToken: string,
   opts?: SendOptions,
   shouldRetry: () => boolean = () => true,
+  sleep: (ms: number) => Promise<void> = defaultSleep,
 ): Promise<void> {
   let attempt = 0;
   const maxRetries = opts?.maxSendRetries ?? DEFAULT_MAX_SEND_RETRIES;
@@ -878,6 +885,7 @@ export function createPoller(deps: PollerDeps) {
   const audit: AuditLog = deps.audit ?? createAuditLog();
   const sendSpacing = deps.sendOptions?.sendSpacingMs ?? DEFAULT_SEND_SPACING_MS;
   const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? defaultSleep;
   const circuitThreshold = deps.circuitBreakerOptions?.failureThreshold ?? DEFAULT_CIRCUIT_FAILURE_THRESHOLD;
   const circuitCooldown = deps.circuitBreakerOptions?.cooldownMs ?? DEFAULT_CIRCUIT_COOLDOWN_MS;
   const errorMessage = (err: unknown): string => safeErrorMessage(err, [config.botToken]);
@@ -1319,7 +1327,7 @@ export function createPoller(deps: PollerDeps) {
 
       try {
         // Use bounded retry for Telegram sends to handle transient failures
-        await sendWithRetry((message) => send(message, event.source, extra), text, config.botToken, deps.sendOptions, () => !status.stopping);
+        await sendWithRetry((message) => send(message, event.source, extra), text, config.botToken, deps.sendOptions, () => !status.stopping, sleep);
         status.notificationsSent += 1;
         sentThisCycle += 1;
       } catch (err) {
