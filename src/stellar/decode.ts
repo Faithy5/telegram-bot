@@ -33,6 +33,7 @@ export type ContractSource = "market" | "squad";
 
 /** 1 USDC in atomic units. */
 export const USDC_UNIT = 10_000_000n;
+const MAX_DECODE_REASON_LENGTH = 240;
 
 /** `WinnerSide` in `mimir-market/src/types.rs`. Unit enums decode to their u32. */
 export const WINNER_SIDE: Record<number, string> = {
@@ -293,6 +294,16 @@ export type MarketEvent =
   | UnknownMarketEvent;
 
 export type DecodedEvent = EventMeta & { payload: EventPayload };
+
+/** Keep decoder diagnostics useful without copying an unbounded RPC payload. */
+const MAX_DIAGNOSTIC_LENGTH = 200;
+
+function diagnostic(value: unknown): string {
+  const compact = String(value).replace(/\s+/g, " ").trim() || "unknown error";
+  return compact.length <= MAX_DIAGNOSTIC_LENGTH
+    ? compact
+    : `${compact.slice(0, MAX_DIAGNOSTIC_LENGTH - 1)}…`;
+}
 
 /** Keep decoder diagnostics useful without copying an unbounded RPC payload. */
 const MAX_DIAGNOSTIC_LENGTH = 200;
@@ -876,7 +887,7 @@ function contractIdOf(event: rpc.Api.EventResponse): string {
  * `unknown` payload with the reason attached. A notifier must not die on an
  * event it was not taught. Malformed metadata falls back to safe defaults
  * (`ledger` 0, indexes `null`, `at` 0) rather than `NaN`, so a poisoned field
- * can neither crash the scanner nor corrupt ordering math.
+ * can neither crash the scanner nor corrupt ordering math.https://github.com/mimir-stellar/telegram-bot/pull/293/conflict?name=tests%252Fdecode.test.mjs&base_oid=55b8808df9ce0cfa2b84e1e3cbbf204ca4293a88&head_oid=a8705ac539d943525daada6f2fb399b79c5a105a
  */
 export function decodeEvent(source: ContractSource, event: rpc.Api.EventResponse): DecodedEvent {
   const meta: EventMeta = safeMeta(source, event);
